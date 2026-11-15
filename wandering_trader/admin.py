@@ -1,11 +1,17 @@
 from django.contrib import admin
 
-from .models import TraderConfig, TraderItem
+from .models import TraderConfig, TraderDialogue, TraderItem
 
 
 @admin.register(TraderConfig)
 class TraderConfigAdmin(admin.ModelAdmin):
-    list_display = ("spawn_chance", "interval_minutes", "stay_minutes", "image_url", "enabled")
+    list_display = ("title", "spawn_chance", "interval_minutes", "stay_minutes", "image_url", "enabled")
+
+
+@admin.register(TraderDialogue)
+class TraderDialogueAdmin(admin.ModelAdmin):
+    list_display = ("text", "emoji_id", "position", "enabled")
+    list_filter = ("enabled",)
 
 
 @admin.register(TraderItem)
