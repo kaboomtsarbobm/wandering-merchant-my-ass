@@ -13,7 +13,7 @@ from bd_models.models import BallInstance, GuildConfig, Player
 from settings.models import settings
 from settings.utils import format_currency
 
-from .models import TraderConfig, TraderItem
+from .models import TraderConfig, TraderDialogue, TraderItem
 from .render import render_trader
 
 if TYPE_CHECKING:
@@ -21,6 +21,13 @@ if TYPE_CHECKING:
 
 
 CATCH_REWARD = 20
+
+BUTTON_STYLES = {
+    "green": discord.ButtonStyle.success,
+    "blurple": discord.ButtonStyle.primary,
+    "grey": discord.ButtonStyle.secondary,
+    "red": discord.ButtonStyle.danger,
+}
 
 
 def reward_catches(original):
@@ -38,6 +45,20 @@ def item_name(item: TraderItem) -> str:
     return item.ball.country
 
 
+def parse_colour(value: str) -> discord.Colour:
+    try:
+        return discord.Colour(int(value.lstrip("#"), 16))
+    except ValueError:
+        return discord.Colour.gold()
+
+
+def emoji_prefix(bot: "BallsDexBot", emoji_id: int | None) -> str:
+    if not emoji_id:
+        return ""
+    emoji = bot.get_emoji(emoji_id)
+    return f"{emoji} " if emoji else ""
+
+
 async def fetch_picture(url: str) -> bytes | None:
     if not url:
         return None
@@ -52,11 +73,11 @@ async def fetch_picture(url: str) -> bytes | None:
 
 
 class BuyButton(discord.ui.Button):
-    def __init__(self, item: TraderItem, bot: "BallsDexBot"):
-        super().__init__(
-            label=f"{item_name(item)} - {format_currency(item.price, shortened=False, bot=bot)}"[:80],
-            style=discord.ButtonStyle.green,
+    def __init__(self, item: TraderItem, bot: "BallsDexBot", config: TraderConfig):
+        label = config.button_label.replace("{name}", item_name(item)).replace(
+            "{price}", format_currency(item.price, shortened=False, bot=bot)
         )
+        super().__init__(label=label[:80], style=BUTTON_STYLES.get(config.button_style, discord.ButtonStyle.success))
         self.item = item
         self.bot = bot
 
@@ -84,29 +105,72 @@ class BuyButton(discord.ui.Button):
         )
 
 
-class TraderView(discord.ui.View):
-    def __init__(self, items: list[TraderItem], bot: "BallsDexBot", stay_seconds: int, leave_message: str):
-        super().__init__(timeout=stay_seconds)
+class TraderView(discord.ui.LayoutView):
+    def __init__(self, bot: "BallsDexBot", config: TraderConfig, items: list[TraderItem], lines: list[str]):
+        super().__init__(timeout=None)
         self.message: discord.Message | None = None
-        self.leave_message = leave_message
-        for item in items:
-            self.add_item(BuyButton(item, bot))
+        self.lines = lines
+        self.interval = max(config.dialogue_seconds, 3)
+        self.stay_seconds = config.stay_minutes * 60
+        prefix = emoji_prefix(bot, config.emoji_id)
+        self.leave_text = prefix + config.leave_message
+        self.dialogue = discord.ui.TextDisplay(prefix + config.spawn_message)
+        self.row = discord.ui.ActionRow(*(BuyButton(item, bot, config) for item in items))
+        self.timer = None
+        children = []
+        if config.title:
+            children.append(discord.ui.TextDisplay(f"## {config.title}"))
+        children.append(self.dialogue)
+        children.append(discord.ui.MediaGallery(discord.MediaGalleryItem("attachment://trader.png")))
+        if config.show_timer:
+            self.timer = discord.ui.TextDisplay(f"-# Leaves <t:{int(time.time()) + self.stay_seconds}:R>")
+            children.append(self.timer)
+        children.append(self.row)
+        self.container = discord.ui.Container(*children, accent_colour=parse_colour(config.accent_colour))
+        self.add_item(self.container)
 
-    async def on_timeout(self):
-        if self.message is None:
-            return
-        embed = discord.Embed(description=self.leave_message, colour=discord.Colour.dark_grey())
-        embed.set_image(url="attachment://trader.png")
+    async def run(self):
+        end = time.monotonic() + self.stay_seconds
+        index = 0
+        while True:
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                break
+            if not self.lines:
+                await asyncio.sleep(remaining)
+                break
+            await asyncio.sleep(min(self.interval, remaining))
+            if time.monotonic() >= end:
+                break
+            self.dialogue.content = self.lines[index % len(self.lines)]
+            index += 1
+            try:
+                await self.message.edit(view=self)
+            except discord.NotFound:
+                self.stop()
+                return
+            except discord.HTTPException:
+                pass
+        await self.leave()
+
+    async def leave(self):
+        self.dialogue.content = self.leave_text
+        self.container.accent_colour = discord.Colour.dark_grey()
+        self.container.remove_item(self.row)
+        if self.timer is not None:
+            self.container.remove_item(self.timer)
         try:
-            await self.message.edit(embed=embed, view=None)
+            await self.message.edit(view=self)
         except discord.HTTPException:
             pass
+        self.stop()
 
 
 class WanderingTrader(commands.Cog):
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
         self.last_roll = time.monotonic()
+        self.tasks: set[asyncio.Task] = set()
         self.original_catch = BallSpawnView.catch_ball
         BallSpawnView.catch_ball = reward_catches(self.original_catch)
         self.roll_loop.start()
@@ -114,6 +178,8 @@ class WanderingTrader(commands.Cog):
     async def cog_unload(self):
         BallSpawnView.catch_ball = self.original_catch
         self.roll_loop.cancel()
+        for task in self.tasks:
+            task.cancel()
 
     async def get_config(self) -> TraderConfig:
         config = await TraderConfig.objects.afirst()
@@ -126,23 +192,20 @@ class WanderingTrader(commands.Cog):
         channel: discord.TextChannel,
         config: TraderConfig,
         pool: list[TraderItem],
+        lines: list[str],
         picture: bytes | None,
     ):
         picks = random.sample(pool, min(3, len(pool)))
-        lines = [
-            (item_name(item), format_currency(item.price, shortened=False, bot=self.bot)) for item in picks
-        ]
-        buffer = await asyncio.to_thread(render_trader, lines, picture)
-        embed = discord.Embed(description=config.spawn_message, colour=discord.Colour.gold())
-        embed.set_image(url="attachment://trader.png")
-        embed.set_footer(text=f"He leaves in {config.stay_minutes} minutes")
-        view = TraderView(picks, self.bot, config.stay_minutes * 60, config.leave_message)
+        scene = [(item_name(item), format_currency(item.price, shortened=False, bot=self.bot)) for item in picks]
+        buffer = await asyncio.to_thread(render_trader, scene, picture)
+        view = TraderView(self.bot, config, picks, lines)
         try:
-            view.message = await channel.send(
-                embed=embed, file=discord.File(buffer, filename="trader.png"), view=view
-            )
+            view.message = await channel.send(file=discord.File(buffer, filename="trader.png"), view=view)
         except discord.HTTPException:
             return
+        task = asyncio.create_task(view.run())
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
 
     @tasks.loop(seconds=30)
     async def roll_loop(self):
@@ -155,6 +218,8 @@ class WanderingTrader(commands.Cog):
         pool = [i async for i in TraderItem.objects.filter(enabled=True).select_related("ball", "special")]
         if not pool:
             return
+        dialogue = [d async for d in TraderDialogue.objects.filter(enabled=True)]
+        lines = [emoji_prefix(self.bot, d.emoji_id or config.emoji_id) + d.text for d in dialogue]
         picture = await fetch_picture(config.image_url)
         guilds = GuildConfig.objects.filter(enabled=True, spawn_channel__isnull=False)
         async for guild_config in guilds:
@@ -163,7 +228,7 @@ class WanderingTrader(commands.Cog):
             channel = self.bot.get_channel(guild_config.spawn_channel)
             if not isinstance(channel, discord.TextChannel):
                 continue
-            await self.spawn(channel, config, pool, picture)
+            await self.spawn(channel, config, pool, lines, picture)
 
     @roll_loop.before_loop
     async def before_roll_loop(self):
