@@ -1,6 +1,14 @@
+from django.core.validators import RegexValidator
 from django.db import models
 
 from bd_models.models import Ball, Special
+
+BUTTON_STYLES = [
+    ("green", "Green"),
+    ("blurple", "Blurple"),
+    ("grey", "Grey"),
+    ("red", "Red"),
+]
 
 
 class TraderConfig(models.Model):
@@ -10,13 +18,35 @@ class TraderConfig(models.Model):
     )
     interval_minutes = models.PositiveIntegerField(default=5, help_text="Minutes between rolls")
     stay_minutes = models.PositiveIntegerField(default=3, help_text="Minutes the trader stays")
-    image_url = models.URLField(max_length=500, blank=True, help_text="Picture placed in the red square of the trader scene")
+    image_url = models.URLField(
+        max_length=500, blank=True, help_text="Picture placed in the red square of the trader scene"
+    )
     spawn_message = models.TextField(
         default="A wandering trader has appeared!", help_text="Message shown when the trader spawns"
     )
     leave_message = models.TextField(
         default="The wandering trader has moved on. Come back another time.",
         help_text="Message shown when the trader leaves",
+    )
+    title = models.CharField(
+        max_length=100, blank=True, default="Wandering Trader", help_text="Heading shown above the message"
+    )
+    accent_colour = models.CharField(
+        max_length=7,
+        default="#D4A017",
+        validators=[RegexValidator(regex=r"^#?[0-9a-fA-F]{6}$", message="Use a hex colour like #D4A017")],
+        help_text="Colour of the bar on the side of the message",
+    )
+    button_style = models.CharField(max_length=10, choices=BUTTON_STYLES, default="green")
+    button_label = models.CharField(
+        max_length=80, default="{name} - {price}", help_text="Text on the buy buttons, use {name} and {price}"
+    )
+    show_timer = models.BooleanField(default=True, help_text="Show when the trader leaves")
+    emoji_id = models.BigIntegerField(
+        null=True, blank=True, help_text="ID of the emoji shown next to everything the trader says"
+    )
+    dialogue_seconds = models.PositiveIntegerField(
+        default=5, help_text="Seconds between dialogue lines (minimum 3)"
     )
 
     class Meta:
@@ -25,6 +55,23 @@ class TraderConfig(models.Model):
 
     def __str__(self):
         return "Trader settings"
+
+
+class TraderDialogue(models.Model):
+    text = models.TextField()
+    emoji_id = models.BigIntegerField(
+        null=True, blank=True, help_text="Emoji ID for this line, replaces the default emoji"
+    )
+    position = models.PositiveIntegerField(default=0, help_text="Lines are shown from lowest to highest")
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+        verbose_name = "trader dialogue line"
+        verbose_name_plural = "trader dialogue lines"
+
+    def __str__(self):
+        return self.text[:50]
 
 
 class TraderItem(models.Model):
