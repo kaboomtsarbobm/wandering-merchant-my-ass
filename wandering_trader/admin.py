@@ -5,7 +5,7 @@ from .models import TraderConfig, TraderItem
 
 @admin.register(TraderConfig)
 class TraderConfigAdmin(admin.ModelAdmin):
-    list_display = ("currency_name", "spawn_chance", "interval_minutes", "stay_minutes", "image_url", "enabled")
+    list_display = ("spawn_chance", "interval_minutes", "stay_minutes", "image_url", "enabled")
 
 
 @admin.register(TraderItem)
