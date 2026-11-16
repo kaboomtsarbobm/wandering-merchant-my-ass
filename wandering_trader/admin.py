@@ -1,5 +1,6 @@
 from django.contrib import admin
 
+from . import token_admin  # noqa: F401
 from .models import TraderConfig, TraderDialogue, TraderItem
 
 
