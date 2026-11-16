@@ -28,6 +28,13 @@ class TraderConfig(models.Model):
         default="The wandering trader has moved on. Come back another time.",
         help_text="Message shown when the trader leaves",
     )
+    purchase_image_url = models.URLField(
+        max_length=500, blank=True, help_text="Picture shown in the message the buyer gets after buying"
+    )
+    purchase_message = models.TextField(
+        default="You bought **{name}** for {price}!",
+        help_text="Message the buyer gets after buying, use {name}, {price} and {user}",
+    )
     title = models.CharField(
         max_length=100, blank=True, default="Wandering Trader", help_text="Heading shown above the message"
     )
@@ -78,6 +85,10 @@ class TraderItem(models.Model):
     ball = models.ForeignKey(Ball, on_delete=models.CASCADE, related_name="+")
     special = models.ForeignKey(Special, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     price = models.PositiveBigIntegerField(default=100)
+    chance = models.PositiveIntegerField(
+        default=100,
+        help_text="How likely this item is to show up compared to the others, 0 means never in the normal roll",
+    )
     enabled = models.BooleanField(default=True)
 
     class Meta:
