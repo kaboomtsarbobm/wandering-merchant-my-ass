@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 from django.db.models import F
 
@@ -15,6 +16,8 @@ from settings.utils import format_currency
 
 from .models import TraderConfig, TraderDialogue, TraderItem
 from .render import render_trader
+from .token_cog import SpawnTokens
+from .token_models import InstantMerchantConfig
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
@@ -187,6 +190,10 @@ class WanderingTrader(commands.Cog):
             config = await TraderConfig.objects.acreate()
         return config
 
+    async def load_lines(self, config: TraderConfig) -> list[str]:
+        dialogue = [d async for d in TraderDialogue.objects.filter(enabled=True)]
+        return [emoji_prefix(self.bot, d.emoji_id or config.emoji_id) + d.text for d in dialogue]
+
     async def spawn(
         self,
         channel: discord.TextChannel,
@@ -207,6 +214,47 @@ class WanderingTrader(commands.Cog):
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
+    @app_commands.command(name="merchant", description="Spawn the wandering trader right now")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def merchant(self, interaction: discord.Interaction["BallsDexBot"]):
+        await interaction.response.defer(ephemeral=True)
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.followup.send("The trader can only show up in a text channel.", ephemeral=True)
+            return
+
+        config = await self.get_config()
+        instant = await InstantMerchantConfig.objects.select_related(
+            "item_1__ball", "item_1__special", "item_2__ball", "item_2__special", "item_3__ball", "item_3__special"
+        ).afirst()
+
+        picks: list[TraderItem] = []
+        if instant is not None:
+            for item in (instant.item_1, instant.item_2, instant.item_3):
+                if item is not None and all(item.pk != p.pk for p in picks):
+                    picks.append(item)
+
+        if len(picks) < 3:
+            extras = [
+                i
+                async for i in TraderItem.objects.filter(enabled=True)
+                .exclude(pk__in=[p.pk for p in picks])
+                .select_related("ball", "special")
+            ]
+            random.shuffle(extras)
+            picks.extend(extras[: 3 - len(picks)])
+
+        if not picks:
+            await interaction.followup.send("There are no trader items set up yet.", ephemeral=True)
+            return
+
+        lines = await self.load_lines(config)
+        picture = await fetch_picture(config.image_url)
+        # this doesn't touch the normal roll timer
+        await self.spawn(channel, config, picks, lines, picture)
+        await interaction.followup.send("The trader has arrived.", ephemeral=True)
+
     @tasks.loop(seconds=30)
     async def roll_loop(self):
         config = await self.get_config()
@@ -218,8 +266,7 @@ class WanderingTrader(commands.Cog):
         pool = [i async for i in TraderItem.objects.filter(enabled=True).select_related("ball", "special")]
         if not pool:
             return
-        dialogue = [d async for d in TraderDialogue.objects.filter(enabled=True)]
-        lines = [emoji_prefix(self.bot, d.emoji_id or config.emoji_id) + d.text for d in dialogue]
+        lines = await self.load_lines(config)
         picture = await fetch_picture(config.image_url)
         guilds = GuildConfig.objects.filter(enabled=True, spawn_channel__isnull=False)
         async for guild_config in guilds:
@@ -237,3 +284,4 @@ class WanderingTrader(commands.Cog):
 
 async def setup(bot: "BallsDexBot"):
     await bot.add_cog(WanderingTrader(bot))
+    await bot.add_cog(SpawnTokens(bot))
