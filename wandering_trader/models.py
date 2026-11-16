@@ -88,3 +88,7 @@ class TraderItem(models.Model):
         if self.special:
             return f"{self.special.name} {self.ball.country} - {self.price}"
         return f"{self.ball.country} - {self.price}"
+
+
+# spawn tokens and the instant merchant settings live in token_models.py
+from .token_models import InstantMerchantConfig, SpawnToken  # noqa: E402,F401
