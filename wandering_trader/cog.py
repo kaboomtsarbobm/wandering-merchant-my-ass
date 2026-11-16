@@ -48,6 +48,18 @@ def item_name(item: TraderItem) -> str:
     return item.ball.country
 
 
+def pick_items(pool: list[TraderItem], count: int = 3) -> list[TraderItem]:
+    if len(pool) <= count:
+        return list(pool)
+    remaining = list(pool)
+    picks: list[TraderItem] = []
+    while remaining and len(picks) < count:
+        choice = random.choices(remaining, weights=[max(i.chance, 1) for i in remaining])[0]
+        picks.append(choice)
+        remaining.remove(choice)
+    return picks
+
+
 def parse_colour(value: str) -> discord.Colour:
     try:
         return discord.Colour(int(value.lstrip("#"), 16))
@@ -83,6 +95,7 @@ class BuyButton(discord.ui.Button):
         super().__init__(label=label[:80], style=BUTTON_STYLES.get(config.button_style, discord.ButtonStyle.success))
         self.item = item
         self.bot = bot
+        self.config = config
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -102,10 +115,17 @@ class BuyButton(discord.ui.Button):
             attack_bonus=random.randint(-20, 20),
             health_bonus=random.randint(-20, 20),
         )
-        await interaction.followup.send(
-            f"You bought **{item_name(self.item)}** for {format_currency(self.item.price, bot=self.bot)}!",
-            ephemeral=True,
+        text = (
+            self.config.purchase_message.replace("{name}", item_name(self.item))
+            .replace("{price}", format_currency(self.item.price, bot=self.bot))
+            .replace("{user}", interaction.user.mention)
         )
+        if self.config.purchase_image_url:
+            embed = discord.Embed(description=text, colour=parse_colour(self.config.accent_colour))
+            embed.set_image(url=self.config.purchase_image_url)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.followup.send(text, ephemeral=True)
 
 
 class TraderView(discord.ui.LayoutView):
@@ -202,7 +222,7 @@ class WanderingTrader(commands.Cog):
         lines: list[str],
         picture: bytes | None,
     ):
-        picks = random.sample(pool, min(3, len(pool)))
+        picks = pick_items(pool)
         scene = [(item_name(item), format_currency(item.price, shortened=False, bot=self.bot)) for item in picks]
         buffer = await asyncio.to_thread(render_trader, scene, picture)
         view = TraderView(self.bot, config, picks, lines)
@@ -238,12 +258,11 @@ class WanderingTrader(commands.Cog):
         if len(picks) < 3:
             extras = [
                 i
-                async for i in TraderItem.objects.filter(enabled=True)
+                async for i in TraderItem.objects.filter(enabled=True, chance__gt=0)
                 .exclude(pk__in=[p.pk for p in picks])
                 .select_related("ball", "special")
             ]
-            random.shuffle(extras)
-            picks.extend(extras[: 3 - len(picks)])
+            picks.extend(pick_items(extras, 3 - len(picks)))
 
         if not picks:
             await interaction.followup.send("There are no trader items set up yet.", ephemeral=True)
@@ -263,7 +282,10 @@ class WanderingTrader(commands.Cog):
         if time.monotonic() - self.last_roll < config.interval_minutes * 60:
             return
         self.last_roll = time.monotonic()
-        pool = [i async for i in TraderItem.objects.filter(enabled=True).select_related("ball", "special")]
+        pool = [
+            i
+            async for i in TraderItem.objects.filter(enabled=True, chance__gt=0).select_related("ball", "special")
+        ]
         if not pool:
             return
         lines = await self.load_lines(config)
