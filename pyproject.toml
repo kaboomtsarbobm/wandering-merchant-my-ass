@@ -1,11 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "wanderingthing"
-version = "1.0.0"
-
+version = "1.0.1"
 description = "buy my shit"
-license = "MIT"  # replace with your own license
+license = "MIT"
 license-files = ["LICENSE"]
 authors = [
     { name = "randomdex", email = "randomdex3@gmail.com" },
 ]
 readme = "README.md"
+
+[tool.setuptools.packages.find]
+include = ["wandering_trader*"]
+
+[tool.setuptools.package-data]
+wandering_trader = ["assets/*"]
