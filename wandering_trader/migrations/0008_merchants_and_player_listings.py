@@ -13,22 +13,49 @@ class Migration(migrations.Migration):
             name="traderconfig",
             options={"verbose_name": "merchant", "verbose_name_plural": "merchants"},
         ),
-        migrations.AddField(
-            model_name="traderconfig",
-            name="purchase_image_url",
-            field=models.URLField(
-                blank=True,
-                max_length=500,
-                help_text="Picture shown on the trader after a purchase, used when the item has none of its own",
+        # these three columns may already exist from the earlier 0008_purchase_and_chance,
+        # so the database part only adds them when they are missing
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunSQL(
+                    sql=[
+                        "ALTER TABLE wandering_trader_traderconfig ADD COLUMN IF NOT EXISTS purchase_image_url varchar(500) NOT NULL DEFAULT ''",
+                        "ALTER TABLE wandering_trader_traderconfig ALTER COLUMN purchase_image_url DROP DEFAULT",
+                        "ALTER TABLE wandering_trader_traderconfig ADD COLUMN IF NOT EXISTS purchase_message text NOT NULL DEFAULT '{user} bought **{name}** for {price}!'",
+                        "ALTER TABLE wandering_trader_traderconfig ALTER COLUMN purchase_message DROP DEFAULT",
+                        "ALTER TABLE wandering_trader_traderitem ADD COLUMN IF NOT EXISTS chance integer NOT NULL DEFAULT 100 CHECK (chance >= 0)",
+                        "ALTER TABLE wandering_trader_traderitem ALTER COLUMN chance DROP DEFAULT",
+                    ],
+                    reverse_sql=migrations.RunSQL.noop,
+                ),
+            ],
+            state_operations=[
+            migrations.AddField(
+                model_name="traderconfig",
+                name="purchase_image_url",
+                field=models.URLField(
+                    blank=True,
+                    max_length=500,
+                    help_text="Picture shown on the trader after a purchase, used when the item has none of its own",
+                ),
             ),
-        ),
-        migrations.AddField(
-            model_name="traderconfig",
-            name="purchase_message",
-            field=models.TextField(
-                default="{user} bought **{name}** for {price}!",
-                help_text="Message shown on the trader after a purchase, use {name}, {price} and {user}",
+            migrations.AddField(
+                model_name="traderconfig",
+                name="purchase_message",
+                field=models.TextField(
+                    default="{user} bought **{name}** for {price}!",
+                    help_text="Message shown on the trader after a purchase, use {name}, {price} and {user}",
+                ),
             ),
+            migrations.AddField(
+                model_name="traderitem",
+                name="chance",
+                field=models.PositiveIntegerField(
+                    default=100,
+                    help_text="How likely this item is to show up compared to the others, 0 means never in the normal roll",
+                ),
+            ),
+            ],
         ),
         migrations.AddField(
             model_name="traderitem",
@@ -40,14 +67,6 @@ class Migration(migrations.Migration):
                 related_name="items",
                 to="wandering_trader.traderconfig",
                 help_text="Which merchant sells this item, empty means the first merchant",
-            ),
-        ),
-        migrations.AddField(
-            model_name="traderitem",
-            name="chance",
-            field=models.PositiveIntegerField(
-                default=100,
-                help_text="How likely this item is to show up compared to the others, 0 means never in the normal roll",
             ),
         ),
         migrations.AddField(
