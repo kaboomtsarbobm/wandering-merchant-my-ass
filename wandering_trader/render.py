@@ -28,8 +28,20 @@ def cover(image, size):
     return resized.crop((left, top, left + size[0], top + size[1]))
 
 
-def render_trader(lines, picture):
+def load_layer(data, size):
+    if not data:
+        return None
+    try:
+        return cover(Image.open(io.BytesIO(data)).convert("RGBA"), size)
+    except OSError:
+        return None
+
+
+def render_trader(lines, picture, background=None, overlay=None):
     canvas = Image.open(BACKGROUND).convert("RGBA")
+    custom = load_layer(background, canvas.size)
+    if custom is not None:
+        canvas = custom
     if picture:
         try:
             art = Image.open(io.BytesIO(picture)).convert("RGBA")
@@ -49,6 +61,9 @@ def render_trader(lines, picture):
         y = top + index * slot
         draw.text((left, y), name, font=name_font, fill="black")
         draw.text((left, y + name_font.size + 14), price, font=price_font, fill=(40, 40, 40))
+    layer = load_layer(overlay, canvas.size)
+    if layer is not None:
+        canvas.alpha_composite(layer)
     canvas = canvas.resize((1024, 1024), Image.LANCZOS)
     buffer = io.BytesIO()
     canvas.convert("RGB").save(buffer, "PNG")
