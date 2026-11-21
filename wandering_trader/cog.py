@@ -291,7 +291,14 @@ class WanderingTrader(commands.Cog):
     ):
         picks = pick_items(pool)
         scene = [(item_name(item), format_currency(item.price, shortened=False, bot=self.bot)) for item in picks]
-        buffer = await asyncio.to_thread(render_trader, scene, *images)
+        buffer = await asyncio.to_thread(
+            render_trader,
+            scene,
+            *images,
+            font=config.item_font,
+            size=config.item_font_size,
+            colour=config.item_font_colour,
+        )
         view = TraderView(self.bot, config, picks, lines)
         try:
             view.message = await channel.send(file=discord.File(buffer, filename="trader.png"), view=view)
@@ -622,7 +629,14 @@ class PlayerMerchants(commands.Cog):
         name = ball_label(instance.ball, instance.special)
         price_text = format_currency(price, shortened=False, bot=self.bot)
         images = await fetch_scene(template)
-        buffer = await asyncio.to_thread(render_trader, [(name, price_text)], *images)
+        buffer = await asyncio.to_thread(
+            render_trader,
+            [(name, price_text)],
+            *images,
+            font=template.item_font,
+            size=template.item_font_size,
+            colour=template.item_font_colour,
+        )
         view = ListingView(self.bot, listing, template, name, interaction.user.id, rules.stay_minutes * 60)
         try:
             view.message = await channel.send(
