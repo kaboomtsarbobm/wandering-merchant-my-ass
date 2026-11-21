@@ -12,7 +12,7 @@ HEX = django.core.validators.RegexValidator(
 class Migration(migrations.Migration):
     dependencies = [
         # replace 0009_FILL_IN with the exact name of your 0009 migration file, without the .py
-        ("wandering_trader", "0009_FILL_IN"),
+        ("wandering_trader", "0009_scene_background_overlay"),
     ]
 
     operations = [
