@@ -76,6 +76,21 @@ class TraderConfig(models.Model):
     dialogue_seconds = models.PositiveIntegerField(
         default=5, help_text="Seconds between dialogue lines (minimum 3)"
     )
+    item_font = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="File name of a font in the package's assets folder, like Pacifico-Regular.ttf. Empty uses the default",
+    )
+    item_font_size = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Biggest size of the item names in the picture, it still shrinks to fit. 0 uses the default",
+    )
+    item_font_colour = models.CharField(
+        max_length=7,
+        blank=True,
+        validators=[HEX_COLOUR],
+        help_text="Hex colour of the item text, like #000000. Empty uses the default",
+    )
 
     class Meta:
         verbose_name = "merchant"
@@ -197,6 +212,21 @@ class PlayerMerchantTemplate(models.Model):
         help_text="Colour of the bar on the side of the message",
     )
     enabled = models.BooleanField(default=True)
+    item_font = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="File name of a font in the package's assets folder, like Pacifico-Regular.ttf. Empty uses the default",
+    )
+    item_font_size = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Biggest size of the item names in the picture, it still shrinks to fit. 0 uses the default",
+    )
+    item_font_colour = models.CharField(
+        max_length=7,
+        blank=True,
+        validators=[HEX_COLOUR],
+        help_text="Hex colour of the item text, like #000000. Empty uses the default",
+    )
 
     class Meta:
         verbose_name = "player merchant style"
