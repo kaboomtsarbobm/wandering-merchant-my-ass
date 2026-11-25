@@ -129,17 +129,13 @@ class BuyButton(discord.ui.Button):
         self.config = config
         self.trader: "TraderView | None" = None
 
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        player, _ = await Player.objects.aget_or_create(discord_id=interaction.user.id)
+    async def purchase(self, user: discord.abc.User) -> str | None:
+        player, _ = await Player.objects.aget_or_create(discord_id=user.id)
         paid = await Player.objects.filter(pk=player.pk, money__gte=self.item.price).aupdate(
             money=F("money") - self.item.price
         )
         if not paid:
-            await interaction.followup.send(
-                f"You don't have enough {settings.currency_display_plural(self.bot)}.", ephemeral=True
-            )
-            return
+            return f"You don't have enough {settings.currency_display_plural(self.bot)}."
         await BallInstance.objects.acreate(
             ball=self.item.ball,
             player=player,
@@ -151,12 +147,84 @@ class BuyButton(discord.ui.Button):
             self.item.purchase_message or self.config.purchase_message,
             name=item_name(self.item),
             price=format_currency(self.item.price, bot=self.bot),
-            user=interaction.user.mention,
+            user=user.mention,
         )
         image = self.item.purchase_image_url or self.config.purchase_image_url
         if self.trader is not None:
             self.trader.show_purchase(text, image)
+        return None
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.config.confirm_purchase:
+            question = fill(
+                self.config.confirm_message,
+                name=item_name(self.item),
+                price=format_currency(self.item.price, bot=self.bot),
+                user=interaction.user.mention,
+            )
+            await interaction.response.send_message(question, view=ConfirmView(self), ephemeral=True)
+            return
+        await interaction.response.defer()
+        error = await self.purchase(interaction.user)
+        if error:
+            await interaction.followup.send(error, ephemeral=True)
+            return
+        if self.trader is not None:
             await interaction.edit_original_response(view=self.trader)
+
+
+class ConfirmView(discord.ui.View):
+    def __init__(self, buy: BuyButton):
+        super().__init__(timeout=60)
+        self.buy = buy
+        self.used = False
+        config = buy.config
+        yes = discord.ui.Button(
+            label=config.confirm_yes_label[:80],
+            style=BUTTON_STYLES.get(config.confirm_yes_style, discord.ButtonStyle.success),
+        )
+        no = discord.ui.Button(
+            label=config.confirm_no_label[:80],
+            style=BUTTON_STYLES.get(config.confirm_no_style, discord.ButtonStyle.danger),
+        )
+        yes.callback = self.confirm
+        no.callback = self.cancel
+        self.add_item(yes)
+        self.add_item(no)
+
+    async def confirm(self, interaction: discord.Interaction):
+        if self.used:
+            await interaction.response.defer()
+            return
+        self.used = True
+        self.stop()
+        await interaction.response.defer()
+        trader = self.buy.trader
+        if trader is None or trader.is_finished():
+            await interaction.edit_original_response(content="The trader has already left.", view=None)
+            return
+        error = await self.buy.purchase(interaction.user)
+        if error:
+            await interaction.edit_original_response(content=error, view=None)
+            return
+        try:
+            await trader.message.edit(view=trader)
+        except discord.HTTPException:
+            pass
+        await interaction.delete_original_response()
+
+    async def cancel(self, interaction: discord.Interaction):
+        if self.used:
+            await interaction.response.defer()
+            return
+        self.used = True
+        self.stop()
+        text = fill(
+            self.buy.config.confirm_cancel_message,
+            name=item_name(self.buy.item),
+            price=format_currency(self.buy.item.price, bot=self.buy.bot),
+        )
+        await interaction.response.edit_message(content=text, view=None)
 
 
 class TraderView(discord.ui.LayoutView):
@@ -278,7 +346,13 @@ class WanderingTrader(commands.Cog):
         return [i async for i in query.select_related("ball", "special")]
 
     async def load_lines(self, config: TraderConfig) -> list[str]:
-        dialogue = [d async for d in TraderDialogue.objects.filter(enabled=True)]
+        default_pk = await TraderConfig.objects.order_by("pk").values_list("pk", flat=True).afirst()
+        query = TraderDialogue.objects.filter(enabled=True)
+        if config.pk == default_pk:
+            query = query.filter(Q(merchant=config) | Q(merchant__isnull=True))
+        else:
+            query = query.filter(merchant=config)
+        dialogue = [d async for d in query]
         return [emoji_prefix(self.bot, d.emoji_id or config.emoji_id) + d.text for d in dialogue]
 
     async def spawn(
