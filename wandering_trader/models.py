@@ -91,6 +91,25 @@ class TraderConfig(models.Model):
         validators=[HEX_COLOUR],
         help_text="Hex colour of the item text, like #000000. Empty uses the default",
     )
+    confirm_purchase = models.BooleanField(
+        default=False, help_text="Ask the buyer to confirm before the purchase goes through"
+    )
+    confirm_message = models.TextField(
+        default="Are you sure you want to buy **{name}** for {price}?",
+        help_text="Question shown to the buyer, use {name}, {price} and {user}",
+    )
+    confirm_yes_label = models.CharField(
+        max_length=80, default="YESSS!!!", help_text="Text on the button that confirms the purchase"
+    )
+    confirm_no_label = models.CharField(
+        max_length=80, default="FUCK NO", help_text="Text on the button that cancels the purchase"
+    )
+    confirm_yes_style = models.CharField(max_length=10, choices=BUTTON_STYLES, default="green")
+    confirm_no_style = models.CharField(max_length=10, choices=BUTTON_STYLES, default="red")
+    confirm_cancel_message = models.TextField(
+        default="Okay, no purchase.",
+        help_text="Message shown when the buyer cancels, use {name} and {price}",
+    )
 
     class Meta:
         verbose_name = "merchant"
@@ -101,6 +120,14 @@ class TraderConfig(models.Model):
 
 
 class TraderDialogue(models.Model):
+    merchant = models.ForeignKey(
+        TraderConfig,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dialogue_lines",
+        help_text="Which merchant says this line, empty means the first merchant",
+    )
     text = models.TextField()
     emoji_id = models.BigIntegerField(
         null=True, blank=True, help_text="Emoji ID for this line, replaces the default emoji"
